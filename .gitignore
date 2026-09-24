@@ -1,0 +1,8 @@
+.DS_Store
+.AppleDouble
+.LSOverride
+._*               # AppleDouble files
+.Spotlight-V100
+.Trashes
+.VolumeIcon.icns
+*/.DS_Store
