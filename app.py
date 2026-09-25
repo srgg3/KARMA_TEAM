@@ -1,4 +1,4 @@
-#запустить проект: streamlit run app.py
+#запустить проект streamlit run app.py
 import time
 import tempfile
 from pathlib import Path
@@ -29,13 +29,20 @@ def get_models():
 
 device, bundles = get_models()
 
-# Загрузчики файлов
-uploaded_dicoms = st.file_uploader("Загрузите DICOM файлы (.dcm)", accept_multiple_files=True)
-uploaded_labels = st.file_uploader("Загрузите файл разметки (Excel)", type=["xlsx", "xls"])
+# Загрузчики файлов (подсказываем пользователю про папки)
+st.markdown("💡 **Подсказка:** Вы можете выделить файлы или *перетащить целую папку* прямо в область ниже.")
+uploaded_dicoms = st.file_uploader(
+    "Загрузите файлы DICOM или перетащите папку",
+    accept_multiple_files=True
+)
+uploaded_labels = st.file_uploader(
+    "Загрузите файл разметки (Excel)",
+    type=["xlsx", "xls"]
+)
 
 if st.button("Запустить анализ"):
     if not uploaded_dicoms:
-        st.warning("Пожалуйста, загрузите хотя бы один DICOM файл.")
+        st.warning("Пожалуйста, загрузите хотя бы один файл или папку со снимками.")
     else:
         # 1. Чтение разметки
         labels_df = None
@@ -46,16 +53,34 @@ if st.button("Запустить анализ"):
         # 2. Инициализация пайплайна
         pipeline = DXAPipeline(device, bundles)
 
-        # 3. Создаем временную папку для сохранения файлов из оперативной памяти
+        # 3. Создаем временную папку
         with tempfile.TemporaryDirectory() as tmpdirname:
             tmp_dir = Path(tmpdirname)
             dicom_paths = []
+            original_names = []
 
-            for uploaded_file in uploaded_dicoms:
-                file_path = tmp_dir / uploaded_file.name
+            for i, uploaded_file in enumerate(uploaded_dicoms):
+                # Фильтруем скрытые файлы (Mac/Windows) и табличные форматы,
+                # которые могли случайно попасть при загрузке папки
+                filename = uploaded_file.name
+                if filename.startswith('.') or filename.lower().endswith(('.xlsx', '.csv', '.py', '.txt')):
+                    continue
+
+                # Добавляем индекс к имени, чтобы файлы из разных подпапок
+                # с одинаковым названием (например, 1.dcm) не перезаписали друг друга
+                safe_name = f"{i}_{filename}"
+                file_path = tmp_dir / safe_name
+
                 with open(file_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
+
                 dicom_paths.append(file_path)
+                # Сохраняем оригинальное имя для красивого вывода в таблице
+                original_names.append(filename)
+
+            if not dicom_paths:
+                st.error("В загруженной папке не найдено подходящих DICOM файлов.")
+                st.stop()
 
             # Элементы интерфейса для отображения прогресса
             progress_bar = st.progress(0)
@@ -66,13 +91,14 @@ if st.button("Запустить анализ"):
 
             # 4. Обработка файлов
             for i, path in enumerate(dicom_paths):
-                status_text.text(f"Обработка файла {i + 1} из {len(dicom_paths)}: {path.name}")
+                original_name = original_names[i]
+                status_text.text(f"Обработка файла {i + 1} из {len(dicom_paths)}: {original_name}")
 
                 # Запуск оригинальной функции
                 row = pipeline.process_file(path, labels_df)
 
                 # Меняем путь во временной папке на оригинальное имя файла для чистоты отчета
-                row["path_to_study"] = uploaded_dicoms[i].name
+                row["path_to_study"] = original_name
                 results.append(row)
 
                 # Обновляем прогресс-бар
@@ -94,7 +120,7 @@ if st.button("Запустить анализ"):
             # Показываем таблицу на экране
             st.dataframe(result_df)
 
-            # 6. Подготовка файла для скачивания (utf-8-sig нужен для русского языка в Excel)
+            # 6. Подготовка файла для скачивания
             csv_data = result_df.to_csv(index=False, encoding="utf-8-sig", sep=";").encode("utf-8-sig")
 
             st.download_button(
